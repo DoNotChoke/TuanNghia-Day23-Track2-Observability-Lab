@@ -14,9 +14,12 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: inference-api
       OTEL_RESOURCE_ATTRIBUTES: deployment.environment=lab,service.namespace=aicb
+      LOKI_PUSH_URL: http://loki:3100/loki/api/v1/push
       LOG_LEVEL: INFO
     depends_on:
       otel-collector:
+        condition: service_started
+      loki:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
@@ -56,6 +59,11 @@ services:
       - ./02-prometheus-grafana/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     environment:
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/REPLACE/ME}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sed "s|__SLACK_WEBHOOK_URL__|$${SLACK_WEBHOOK_URL}|g" /etc/alertmanager/alertmanager.yml > /tmp/alertmanager.yml
+        exec /bin/alertmanager --config.file=/tmp/alertmanager.yml --storage.path=/alertmanager
     networks: [obs]
 
   grafana:

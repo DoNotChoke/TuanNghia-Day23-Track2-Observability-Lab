@@ -20,6 +20,7 @@ from instrumentation import (
     INFERENCE_REQUESTS,
     INFERENCE_TOKENS,
     bind_log,
+    push_loki_log,
     setup_otel,
     tracer,
 )
@@ -73,6 +74,7 @@ def predict(req: PredictRequest) -> PredictResponse:
         if req.fail:
             INFERENCE_REQUESTS.labels(model=req.model, status="error").inc()
             log.error("forced failure", model=req.model)
+            push_loki_log("forced failure", level="error", model=req.model)
             raise HTTPException(status_code=503, detail="forced failure (alert demo)")
 
         with tracer.start_as_current_span("embed-text") as s:
@@ -100,6 +102,16 @@ def predict(req: PredictRequest) -> PredictResponse:
         trace_id = format(span.get_span_context().trace_id, "032x")
         log.info(
             "prediction served",
+            model=req.model,
+            input_tokens=in_toks,
+            output_tokens=out_toks,
+            quality=quality,
+            duration_seconds=round(elapsed, 4),
+            trace_id=trace_id,
+        )
+        push_loki_log(
+            "prediction served",
+            level="info",
             model=req.model,
             input_tokens=in_toks,
             output_tokens=out_toks,

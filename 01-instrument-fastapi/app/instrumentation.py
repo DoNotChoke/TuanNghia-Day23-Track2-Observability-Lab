@@ -4,9 +4,12 @@ Single source of truth for the metric/span/log namespace.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
+import time
+import urllib.request
 
 import structlog
 from opentelemetry import trace
@@ -97,3 +100,44 @@ def _configure_logging() -> None:
 
 def bind_log(name: str) -> structlog.BoundLogger:
     return structlog.get_logger(name)
+
+
+def push_loki_log(event: str, **fields: object) -> None:
+    """Best-effort push of the structured app log to Loki."""
+    push_url = os.getenv("LOKI_PUSH_URL")
+    if not push_url:
+        return
+
+    labels = {
+        "service_name": os.getenv("OTEL_SERVICE_NAME", "inference-api"),
+        "container_name": "day23-app",
+        "level": str(fields.get("level", "info")),
+    }
+    line = json.dumps(
+        {
+            **fields,
+            "event": event,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+        separators=(",", ":"),
+    )
+    payload = json.dumps(
+        {
+            "streams": [
+                {
+                    "stream": labels,
+                    "values": [[str(time.time_ns()), line]],
+                }
+            ]
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        push_url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(request, timeout=0.5).close()
+    except Exception:
+        return
